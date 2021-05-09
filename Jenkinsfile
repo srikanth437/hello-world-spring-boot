@@ -11,7 +11,7 @@ pipeline {
                     registryCredential = 'dockerhub-creds'
                     env.TAG = "java-" + "${BUILD_NUMBER}"
                     env.IMAGE = "srikanth437/test-deploy" + ":" + "${env.TAG}"
-                    env.FILENAME = "java-test.yaml"
+                    env.FILENAME = "java-test.yml"
                 } //script end           
             } //steps end
         } // env Variables stage end
