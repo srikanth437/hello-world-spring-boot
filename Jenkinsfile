@@ -1,59 +1,61 @@
-node {
-    // reference to maven
-    // ** NOTE: This 'maven-3.6.1' Maven tool must be configured in the Jenkins Global Configuration.   
-    def mvnHome = tool 'maven-3.6.1'
+pipeline {
+    agent any
+    stages {
+        stage("Env Variables") {
+            steps {
 
-    // holds reference to docker image
-    def dockerImage
-    // ip address of the docker private repository(nexus)
-    
-    def dockerRepoUrl = "localhost:8083"
-    def dockerImageName = "hello-world-java"
-    def dockerImageTag = "${dockerRepoUrl}/${dockerImageName}:${env.BUILD_NUMBER}"
-    
-    stage('Clone Repo') { // for display purposes
-      // Get some code from a GitHub repository
-      git 'https://github.com/dstar55/docker-hello-world-spring-boot.git'
-      // Get the Maven tool.
-      // ** NOTE: This 'maven-3.6.1' Maven tool must be configured
-      // **       in the global configuration.           
-      mvnHome = tool 'maven-3.6.1'
-    }    
-  
-    stage('Build Project') {
-      // build project via maven
-      sh "'${mvnHome}/bin/mvn' -Dmaven.test.failure.ignore clean package"
-    }
-	
-	stage('Publish Tests Results'){
-      parallel(
-        publishJunitTestsResultsToJenkins: {
-          echo "Publish junit Tests Results"
-		  junit '**/target/surefire-reports/TEST-*.xml'
-		  archive 'target/*.jar'
-        },
-        publishJunitTestsResultsToSonar: {
-          echo "This is branch b"
-      })
-    }
-		
-    stage('Build Docker Image') {
-      // build docker image
-      sh "whoami"
-      sh "ls -all /var/run/docker.sock"
-      sh "mv ./target/hello*.jar ./data" 
-      
-      dockerImage = docker.build("hello-world-java")
-    }
-   
-    stage('Deploy Docker Image'){
-      
-      // deploy docker image to nexus
+                script {
+                    //env.ECRREPOURI = "565057454984.dkr.ecr.ap-south-1.amazonaws.com/med-admin"
+                    //env.DOCKERPUSHURL = "https://565057454984.dkr.ecr.ap-south-1.amazonaws.com/med-admin"
+                    registry = "srikanth437/test-deploy"
+                    registryCredential = 'dockerhub-creds'
+                    env.TAG = "java-" + "${BUILD_NUMBER}"
+                    env.IMAGE = "srikanth437/test-deploy" + ":" + "${env.TAG}"
+                    env.FILENAME = "java-test.yaml"
+                } //script end           
+            } //steps end
+        } // env Variables stage end
+        
+        stage("Docker build") {
+            steps {
+                sh """ 
+                    docker build . -t ${env.IMAGE}
+                """
+            } // steps end
+        } // docker build stage end
 
-      echo "Docker Image Tag Name: ${dockerImageTag}"
+        stage("Docker push ") {
+            steps
+              {
+                script { 
 
-      sh "docker login -u admin -p admin123 ${dockerRepoUrl}"
-      sh "docker tag ${dockerImageName} ${dockerImageTag}"
-      sh "docker push ${dockerImageTag}"
-    }
-}
+                    //docker.withRegistry( 'https://registry.hub.docker.com' , registryCredential ) { 
+                        withDockerRegistry([ credentialsId: "dockerhub-creds", url: "" ]) {
+                        sh "docker push ${env.IMAGE}"
+                    }
+                }
+            } // steps end
+        } //  docker push stage end
+
+        stage("Replacing Yaml Variables") {
+            steps {
+                sh """      
+                    sed -i "s|CONTAINER_IMAGE|${env.IMAGE}|g" ${env.FILENAME}
+                """
+            } //steps end
+        } //Replacing yaml Variables stage end
+
+        stage("k8S file deployment") {
+            steps {
+               script{                 
+                        withKubeConfig(caCertificate: '', clusterName: 'test-development', contextName: '', credentialsId: 'kubernetes-service-account-token', namespace: '', serverUrl: 'https://A5883926147CA7BC33F63A3D3EBA596E.gr7.us-east-2.eks.amazonaws.com') {
+                        //sh "kubectl apply -f ${WORKSPACE}/${env.FILENAME}"
+                        sh "kubectl apply -f env.FILENAME -n default"
+                        sh "kubectl get pods -n default"
+                     }  // withKubeConfig end 
+                    
+                } //script end
+            } // steps end
+        } //  k8S deployment file deployment stage end
+    } //stages end
+} //pipeline end
